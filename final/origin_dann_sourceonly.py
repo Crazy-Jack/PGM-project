@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[2]:
+# In[104]:
 
 
 import torch
@@ -12,6 +12,7 @@ import argparse
 from torch.utils.data import Dataset, DataLoader
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.autograd import Function
 import torch.optim as optim
 import numpy as np
 import matplotlib.pyplot as plt
@@ -25,7 +26,7 @@ from PIL import Image
 
 # # Parser
 
-# In[3]:
+# In[105]:
 
 
 parser = argparse.ArgumentParser(description='Domain adaptation')
@@ -35,12 +36,13 @@ parser.add_argument("--momentum", type=float, default=0.5, help="momentum")
 parser.add_argument("--gpu_num", type=int, default=0, help="gpu num")
 parser.add_argument("--seed", type=int, default=123, help="munually set seed")
 parser.add_argument("--save_path", type=str, default="../train_related", help="save path")
-parser.add_argument("--subfolder", type=str, default='domain_origin_dann_svhn_to_mnist', help="subfolder name")
+parser.add_argument("--subfolder", type=str, default='domain_origin_dann_svhn_to_mnist_reversegradient', help="subfolder name")
 parser.add_argument("--wtarget", type=float, default=0.7, help="target weight")
 parser.add_argument("--model_save_period", type=int, default=2, help="save period")
 parser.add_argument("--epochs", type=int, default=2000, help="label shuffling")
 parser.add_argument("--dann_weight", type=float, default=1, help="weight for label shuffling")
 parser.add_argument("--start_origin_dann", type=int, default=100, help="when to start shuffling")
+parser.add_argument("--use_gpu", type=int, default=0, help="whether using gpu to train")
 
 
 args = parser.parse_args()
@@ -50,7 +52,7 @@ python_file_name = sys.argv[0]
 
 # # local only
 
-# In[4]:
+# In[128]:
 
 
 # # local only
@@ -71,14 +73,18 @@ python_file_name = sys.argv[0]
 #     'dann_weight': 1,
 #     'model_save_period': 2,
 #     'start_origin_dann': 0,
+#     'use_gpu': 1,
 # })
 
 
-# In[16]:
+# In[109]:
 
 
-
-device = torch.device('cuda:{}'.format(args.gpu_num) if torch.cuda.is_available() else 'cpu')
+if args.use_gpu == 1 and torch.cuda.is_available():
+    device = torch.device('cuda:{}'.format(args.gpu_num))
+else:
+    device = 'cpu'
+print(device)
 # seed
 torch.manual_seed(args.seed)
 torch.cuda.manual_seed(args.seed)
@@ -88,8 +94,7 @@ torch.backends.cudnn.deterministic = True
 
 
 
-device = torch.device('cuda:{}'.format(args.gpu_num) if torch.cuda.is_available() else 'cpu')
-print(device)
+
 
 
 model_sub_folder = args.subfolder + '/origin_dann_weight_%f_learningrate_%f'%(args.dann_weight, args.learning_rate)
@@ -98,7 +103,7 @@ if not os.path.exists(save_folder):
     os.makedirs(save_folder)   
 
 
-# In[17]:
+# In[110]:
 
 
 
@@ -113,7 +118,7 @@ logger.addHandler(file_log_handler)
 
 stdout_log_handler = logging.StreamHandler(sys.stdout)
 logger.addHandler(stdout_log_handler)
-
+logger.info("Fixed source testing bug")
 attrs = vars(args)
 for item in attrs.items():
     logger.info("%s: %s"%item)
@@ -122,7 +127,7 @@ logger.info("Training Save Path: {}".format(save_folder))
 
 # # Data loader
 
-# In[18]:
+# In[111]:
 
 
 mnist_trainset = datasets.MNIST(root='../data', train=True, download=True, transform=torchvision.transforms.Compose([
@@ -132,7 +137,7 @@ mnist_trainset = datasets.MNIST(root='../data', train=True, download=True, trans
                              ]))
 
 
-# In[19]:
+# In[112]:
 
 
 mnist_testset = datasets.MNIST(root='../data', train=False, download=True, transform=torchvision.transforms.Compose([
@@ -142,7 +147,7 @@ mnist_testset = datasets.MNIST(root='../data', train=False, download=True, trans
                              ]))
 
 
-# In[20]:
+# In[113]:
 
 
 svhn_trainset = datasets.SVHN(root='../data', split='train', download=True, transform=torchvision.transforms.Compose([
@@ -152,7 +157,7 @@ svhn_trainset = datasets.SVHN(root='../data', split='train', download=True, tran
                     torchvision.transforms.Normalize([0.5], [0.5])]))
 
 
-# In[21]:
+# In[114]:
 
 
 svhn_testset = datasets.SVHN(root='../data', split='test', download=True, transform=torchvision.transforms.Compose([
@@ -162,7 +167,7 @@ svhn_testset = datasets.SVHN(root='../data', split='test', download=True, transf
                     torchvision.transforms.Normalize([0.5], [0.5])]))
 
 
-# In[22]:
+# In[115]:
 
 
 # # mnist
@@ -182,39 +187,45 @@ svhn_testset = datasets.SVHN(root='../data', split='test', download=True, transf
 #   plt.yticks([])
 
 
-# In[23]:
+# In[116]:
 
 
-# # svhn
-# train_svhn_loader = DataLoader(svhn_trainset, batch_size=args.batch_size, shuffle=True)
-# test_svhn_loader = DataLoader(svhn_trainset, batch_size=args.batch_size, shuffle=True)
-# examples = enumerate(train_svhn_loader)
-# batch_idx, (example_data, example_targets) = next(examples)
+# svhn
+train_svhn_loader = DataLoader(svhn_trainset, batch_size=args.batch_size, shuffle=True)
+test_svhn_loader = DataLoader(svhn_trainset, batch_size=args.batch_size, shuffle=True)
+examples = enumerate(train_svhn_loader)
+batch_idx, (example_data, example_targets) = next(examples)
 
 
-# fig = plt.figure()
-# for i in range(6):
-#   plt.subplot(2,3,i+1)
-#   plt.tight_layout()
-#   plt.imshow(example_data[i][0], cmap='gray', interpolation='none')
-#   plt.title("Ground Truth: {}".format(example_targets[i]))
-#   plt.xticks([])
-#   plt.yticks([])
+fig = plt.figure()
+for i in range(6):
+    plt.subplot(2,3,i+1)
+    plt.tight_layout()
+    plt.imshow(example_data[i][0], cmap='gray', interpolation='none')
+    plt.title("Ground Truth: {}".format(example_targets[i]))
+    plt.xticks([])
+    plt.yticks([])
 
 
-# In[24]:
+# In[ ]:
+
+
+
+
+
+# In[117]:
 
 
 # reload data
 train_mnist_loader = DataLoader(mnist_trainset, batch_size=args.batch_size, shuffle=True)
 test_mnist_loader = DataLoader(mnist_testset, batch_size=args.batch_size, shuffle=True)
 train_svhn_loader = DataLoader(svhn_trainset, batch_size=args.batch_size, shuffle=True)
-test_svhn_loader = DataLoader(svhn_trainset, batch_size=args.batch_size, shuffle=True)
+test_svhn_loader = DataLoader(svhn_testset, batch_size=args.batch_size, shuffle=True)
 
 
 # ## Process data for cancat with source and target label
 
-# In[25]:
+# In[118]:
 
 
 class ConcatDataset(Dataset):
@@ -250,7 +261,7 @@ class ConcatDataset(Dataset):
         return img, self.y[index]
 
 
-# In[27]:
+# In[119]:
 
 
 
@@ -271,7 +282,7 @@ adverial_loader = DataLoader(adverial_dataset, batch_size=args.batch_size, shuff
 
 # # Model
 
-# In[28]:
+# In[120]:
 
 
 class Encoder(nn.Module):
@@ -293,7 +304,7 @@ class Encoder(nn.Module):
         return x
 
 
-# In[29]:
+# In[121]:
 
 
 class FNN(nn.Module):
@@ -335,7 +346,25 @@ class FNN(nn.Module):
         
 
 
-# In[30]:
+# In[122]:
+
+
+class ReverseLayerF(Function):
+
+    @staticmethod
+    def forward(ctx, x, alpha):
+        ctx.alpha = alpha
+
+        return x.view_as(x)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        output = grad_output.neg() * ctx.alpha
+
+        return output, None
+
+
+# In[123]:
 
 
 class Adversial_loss(nn.Module):
@@ -346,7 +375,7 @@ class Adversial_loss(nn.Module):
         pass
 
 
-# In[31]:
+# In[124]:
 
 
 def weights_init(m):
@@ -357,12 +386,9 @@ def weights_init(m):
         torch.nn.init.constant_(m.bias, 0)
 
 
-# In[32]:
+# In[125]:
 
 
-
-device = torch.device('cuda:{}'.format(args.gpu_num) if torch.cuda.is_available() else 'cpu')
-print(device)
 torch.manual_seed(args.seed)
 torch.cuda.manual_seed(args.seed)
 np.random.seed(args.seed)
@@ -379,7 +405,7 @@ optimizerCNet = optim.Adam(CNet.parameters(), lr=args.learning_rate)
 optimizerDomainCNet = optim.Adam(DomainCNet.parameters(), lr=args.learning_rate)
 
 criterion_classifier = nn.CrossEntropyLoss().to(device)
-# criterion_adverisal = 
+
 
 encoder.apply(weights_init)
 CNet.apply(weights_init)
@@ -388,7 +414,7 @@ DomainCNet.apply(weights_init)
 
 # # Train
 
-# In[1]:
+# In[129]:
 
 
 target_acc_label_ = []
@@ -464,26 +490,14 @@ for epoch in range(args.epochs):
             adv_y = adv_y.to(device)
             num_datas += adv_x.size(0)
             adv_x_embedding = encoder(adv_x)
-            pred = DomainCNet(adv_x_embedding)
+            reverse_adv_x_embedding = ReverseLayerF.apply(adv_x_embedding, args.dann_weight)
+            pred = DomainCNet(reverse_adv_x_embedding)
+            
             # adv_acc += (pred.argmax(-1) == adv_y).sum().item()
-            loss = - args.dann_weight * criterion_classifier(pred, adv_y)
+            loss = criterion_classifier(pred, adv_y)
             loss.backward()
             optimizerEncoder.step()
-
-        for batch_id, (adv_x, adv_y) in tqdm(enumerate(adverial_loader), total=len(adverial_loader)):
-            # domain layer loss
-            DomainCNet.train()
-            encoder.train()
-            optimizerCNet.zero_grad()
-            optimizerEncoder.zero_grad()
-            adv_x = adv_x.to(device).float()
-            adv_y = adv_y.to(device)
-            adv_x_embedding = encoder(adv_x)
-            pred = DomainCNet(adv_x_embedding)
-            # adv_acc += (pred.argmax(-1) == adv_y).sum().item()
-            loss_adv = args.dann_weight * criterion_classifier(pred, adv_y)
-            loss_adv.backward()
-            optimizerDomainCNet.step()    
+            optimizerDomainCNet.step()
 
     
     
@@ -529,7 +543,9 @@ for epoch in range(args.epochs):
 
     
     logger.info('Epochs %i: source train acc: %f; source test acc: %f; target test acc: %f'%(epoch+1, source_acc, source_test_acc, target_test_acc))
-    
+    np.save(os.path.join(args.save_path, model_sub_folder, 'source_acc_.npy'),source_acc_)
+    np.save(os.path.join(args.save_path, model_sub_folder, 'source_test_acc_.npy'),source_test_acc_)
+    np.save(os.path.join(args.save_path, model_sub_folder, 'target_test_acc_.npy'),target_test_acc_)
 
 
 # In[ ]:

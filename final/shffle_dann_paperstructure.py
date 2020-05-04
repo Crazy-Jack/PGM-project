@@ -114,7 +114,7 @@ logger.addHandler(file_log_handler)
 
 stdout_log_handler = logging.StreamHandler(sys.stdout)
 logger.addHandler(stdout_log_handler)
-
+logger.info("Fixed source testing bug")
 attrs = vars(args)
 for item in attrs.items():
     logger.info("%s: %s"%item)
@@ -203,14 +203,14 @@ svhn_testset = datasets.SVHN(root='../data', split='test', download=True, transf
 #     plt.yticks([])
 
 
-# In[59]:
+# In[1]:
 
 
 # reload data
 train_mnist_loader = DataLoader(mnist_trainset, batch_size=args.batch_size, shuffle=True)
 test_mnist_loader = DataLoader(mnist_testset, batch_size=args.batch_size, shuffle=True)
 train_svhn_loader = DataLoader(svhn_trainset, batch_size=args.batch_size, shuffle=True)
-test_svhn_loader = DataLoader(svhn_trainset, batch_size=args.batch_size, shuffle=True)
+test_svhn_loader = DataLoader(svhn_testset, batch_size=args.batch_size, shuffle=True)
 
 
 # ## Process data for cancat with source and target label
@@ -505,7 +505,7 @@ for epoch in range(args.epochs):
     # eval on target 
     num_datas = 0.0
     target_test_acc = 0.0
-    for batch_id, (target_x, target_y) in tqdm(enumerate(train_mnist_loader), total=len(train_mnist_loader)):
+    for batch_id, (target_x, target_y) in tqdm(enumerate(test_mnist_loader), total=len(test_mnist_loader)):
         optimizerCNet.zero_grad()
         optimizerEncoder.zero_grad()
         target_x = target_x.to(device).float()

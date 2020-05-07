@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[9]:
+# In[1]:
 
 
 import torch
@@ -10,7 +10,7 @@ import torchvision.datasets as datasets
 from tqdm import tqdm
 import argparse
 from torch.utils.data import Dataset, DataLoader
-from PAC_Dataset import PACDataset, ConcatDataset
+from PAC_Dataset import PACDataset, ConcatDataset, ShuffleClassDataset, ConcatDomainDataset
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
@@ -23,6 +23,7 @@ import logging
 import logging.handlers
 from PIL import Image
 import torchvision.transforms.functional as TF
+from shutil import copyfile
 
 
 # # Parser
@@ -44,6 +45,7 @@ parser.add_argument("--epochs", type=int, default=2000, help="label shuffling")
 parser.add_argument("--dann_weight", type=float, default=1, help="weight for label shuffling")
 parser.add_argument("--start_shuffle_dann", type=int, default=100, help="when to start shuffling")
 parser.add_argument("--is_shuffle", type=int, default=1, help="no shuffle if 0")
+parser.add_argument("--domains", type=int, default=2, help="how many source domain")
 
 
 args = parser.parse_args()
@@ -53,7 +55,7 @@ python_file_name = sys.argv[0]
 
 # # local only
 
-# In[4]:
+# In[19]:
 
 
 # # local only
@@ -62,7 +64,7 @@ python_file_name = sys.argv[0]
 #         self.__dict__.update(entries)
         
 # args = local_args(**{
-#     'batch_size': 200,
+#     'batch_size': 100,
 #     'learning_rate': 1e-3,
 #     'momentum': 0.5,
 #     'gpu_num': 0,
@@ -73,8 +75,9 @@ python_file_name = sys.argv[0]
 #     'wtarget': 0.7,
 #     'dann_weight': 1,
 #     'model_save_period': 2,
-#     'start_shuffle_dann': 1,
-#     'is_shuffle': 0
+#     'start_shuffle_dann': 0,
+#     'is_shuffle': 1,
+#     'domains': 3,
 # })
 
 
@@ -96,7 +99,7 @@ device = torch.device('cuda:{}'.format(args.gpu_num) if torch.cuda.is_available(
 print(device)
 
 
-model_sub_folder = args.subfolder + '/shuffle_weight_%f_learningrate_%f_startsepoch_%i_isshuffle_%i'%(args.dann_weight, args.learning_rate, args.start_shuffle_dann, args.is_shuffle)
+model_sub_folder = args.subfolder + '/shuffle_weight_%f_learningrate_%f_startsepoch_%i_isshuffle_%i_domains_%i'%(args.dann_weight, args.learning_rate, args.start_shuffle_dann, args.is_shuffle, args.domains)
 save_folder = os.path.join(args.save_path, model_sub_folder)
 if not os.path.exists(save_folder):
     os.makedirs(save_folder)   
@@ -123,6 +126,12 @@ for item in attrs.items():
     logger.info("%s: %s"%item)
 logger.info("Training Save Path: {}".format(save_folder))
 
+copyfile(python_file_name, os.path.join(save_folder, 'executed.py'))
+commands = ['python']
+commands.extend(sys.argv)
+with open(os.path.join(save_folder, 'command.log'), 'w') as f:
+    f.write(' '.join(commands))
+
 
 # # Data loader
 
@@ -141,7 +150,7 @@ s_dataset_test = PACDataset('s', split = 'test')
 
 # ## Visual comfirm
 
-# In[20]:
+# In[8]:
 
 
 # p_dataloader = DataLoader(p_dataset_test, batch_size=args.batch_size, shuffle=True)
@@ -160,35 +169,20 @@ s_dataset_test = PACDataset('s', split = 'test')
 #     plt.yticks([])
 
 
-# In[8]:
+# In[9]:
 
 
-p_train_dataloader = DataLoader(p_dataset_train, batch_size=args.batch_size, shuffle=True)
-p_test_dataloader = DataLoader(p_dataset_test, batch_size=args.batch_size, shuffle=True)
+p_train_dataloader = DataLoader(p_dataset_train, batch_size=args.batch_size, shuffle=True, pin_memory=True)
+p_test_dataloader = DataLoader(p_dataset_test, batch_size=args.batch_size, shuffle=True, pin_memory=True)
 
-a_train_dataloader = DataLoader(a_dataset_train, batch_size=args.batch_size, shuffle=True)
-a_test_dataloader = DataLoader(a_dataset_test, batch_size=args.batch_size, shuffle=True)
+a_train_dataloader = DataLoader(a_dataset_train, batch_size=args.batch_size, shuffle=True, pin_memory=True)
+a_test_dataloader = DataLoader(a_dataset_test, batch_size=args.batch_size, shuffle=True, pin_memory=True)
 
-c_train_dataloader = DataLoader(c_dataset_train, batch_size=args.batch_size, shuffle=True)
-c_test_dataloader = DataLoader(c_dataset_test, batch_size=args.batch_size, shuffle=True)
+c_train_dataloader = DataLoader(c_dataset_train, batch_size=args.batch_size, shuffle=True, pin_memory=True)
+c_test_dataloader = DataLoader(c_dataset_test, batch_size=args.batch_size, shuffle=True, pin_memory=True)
 
-s_train_dataloader = DataLoader(s_dataset_train, batch_size=args.batch_size, shuffle=True)
-s_test_dataloader = DataLoader(s_dataset_test, batch_size=args.batch_size, shuffle=True)
-
-
-# # Shuffling label
-
-# In[16]:
-
-
-
-concat_mnist_train = ConcatDataset(mnist_trainset.data, torch.randint(0,2,(mnist_trainset.data.shape[0],)), mode = 'mnist')
-concat_svhn_train = ConcatDataset(svhn_trainset.data, torch.randint(0,2,(svhn_trainset.data.shape[0],)), mode = 'svhn')
-
-
-adverial_dataset = torch.utils.data.ConcatDataset([concat_mnist_train, concat_svhn_train])
-# [i[1] for i in [adverial_dataset[m] for m in torch.randint(0, len(adverial_dataset), (100,))]]
-adverial_loader = DataLoader(adverial_dataset, batch_size=args.batch_size, shuffle=True)
+s_train_dataloader = DataLoader(s_dataset_train, batch_size=args.batch_size, shuffle=True, pin_memory=True)
+s_test_dataloader = DataLoader(s_dataset_test, batch_size=args.batch_size, shuffle=True, pin_memory=True)
 
 
 # In[ ]:
@@ -197,9 +191,24 @@ adverial_loader = DataLoader(adverial_dataset, batch_size=args.batch_size, shuff
 
 
 
-# # Model
+# # Shuffling Domain label
 
 # In[10]:
+
+
+
+source_train_tuple = (p_dataset_train, a_dataset_train, s_dataset_train)
+# source_test_tuple = (p_dataset_test, a_dataset_test, s_dataset_test)
+
+shuffle_domain_train_dataset = ShuffleClassDataset(ConcatDomainDataset(p_dataset_train, a_dataset_train, s_dataset_train, c_dataset_train))
+# shuffle_domain_test = ShuffleClassDataset(ConcatDomainDataset(source_test_tuple))
+
+shuffle_domain_train_dataloader = DataLoader(shuffle_domain_train_dataset, batch_size=args.batch_size, shuffle=True, pin_memory=True)
+
+
+# # Model
+
+# In[11]:
 
 
 class Encoder(nn.Module):
@@ -221,7 +230,7 @@ class Encoder(nn.Module):
         return x
 
 
-# In[11]:
+# In[12]:
 
 
 class FNN(nn.Module):
@@ -263,7 +272,7 @@ class FNN(nn.Module):
         
 
 
-# In[12]:
+# In[13]:
 
 
 def weights_init(m):
@@ -274,7 +283,7 @@ def weights_init(m):
         torch.nn.init.constant_(m.bias, 0)
 
 
-# In[13]:
+# In[14]:
 
 
 
@@ -305,26 +314,32 @@ DomainCNet.apply(weights_init)
 
 # # Train
 
-# In[27]:
+# In[21]:
 
 
-target_acc_label_ = []
+# acc store
 source_acc_1_ = []
 source_acc_2_ = []
 source_acc_3_ = []
-source_test_acc_ = []
+source_test_acc_1_ = []
+source_test_acc_2_ = []
+source_test_acc_3_ = []
 target_test_acc_ = []
 domain_acc_ = []
 
-
-loss_source_1_[]
-loss_source_2_[]
-loss_source_3_[]
+#loss store
+accumulate_domain_loss_ = []
+loss_source_1_ = []
+loss_source_2_ = []
+loss_source_3_ = []
 
 logger.info('Started Training')
 
 
 for epoch in range(args.epochs):
+    log_loss_str = ""
+    log_train_acc_str = ""
+    log_test_acc_str = ""
     # update classifier
     # on source 1 domain p
     CNet.train()
@@ -342,7 +357,7 @@ for epoch in range(args.epochs):
         pred = CNet(source_x_embedding)
         source_acc_1 += (pred.argmax(-1) == source_y).sum().item()
         loss = criterion_classifier(pred, source_y)
-        loss_source_1 += loss.item
+        loss_source_1 += loss.item()
         loss.backward()
         optimizerCNet.step()
         optimizerEncoder.step()
@@ -352,63 +367,102 @@ for epoch in range(args.epochs):
     source_acc_1_.append(source_acc_1)
     loss_source_1_.append(loss_source_1)
     
+    log_loss_str += "source 1 loss: {}; ".format(loss_source_1)
+    log_train_acc_str += "source 1 train acc: {}; ".format(source_acc_1)
     
-    # on source 2 domain c
-    CNet.train()
-    encoder.train()
-    source_acc_2 = 0.0
-    num_datas = 0.0
-    loss_source_2 = 0.0
-    for batch_id, (source_x, source_y) in tqdm(enumerate(c_train_dataloader), total=len(c_train_dataloader)):
-        optimizerCNet.zero_grad()
-        optimizerEncoder.zero_grad()
-        source_x = source_x.to(device).float()
-        source_y = source_y.to(device)
-        num_datas += source_x.size(0)
-        source_x_embedding = encoder(source_x)
-        pred = CNet(source_x_embedding)
-        source_acc_2 += (pred.argmax(-1) == source_y).sum().item()
-        loss = criterion_classifier(pred, source_y)
-        loss_source_2 += loss.item()
-        loss.backward()
-        optimizerCNet.step()
-        optimizerEncoder.step()
+    if args.domains >= 2:
+        # on source 2 domain c
+        CNet.train()
+        encoder.train()
+        source_acc_2 = 0.0
+        num_datas = 0.0
+        loss_source_2 = 0.0
+        for batch_id, (source_x, source_y) in tqdm(enumerate(a_train_dataloader), total=len(a_train_dataloader)):
+            optimizerCNet.zero_grad()
+            optimizerEncoder.zero_grad()
+            source_x = source_x.to(device).float()
+            source_y = source_y.to(device)
+            num_datas += source_x.size(0)
+            source_x_embedding = encoder(source_x)
+            pred = CNet(source_x_embedding)
+            source_acc_2 += (pred.argmax(-1) == source_y).sum().item()
+            loss = criterion_classifier(pred, source_y)
+            loss_source_2 += loss.item()
+            loss.backward()
+            optimizerCNet.step()
+            optimizerEncoder.step()
+
+
+        source_acc_2 = source_acc_2 / num_datas
+        source_acc_2_.append(source_acc_2)
+        loss_source_2_.append(loss_source_2)
+        log_loss_str += "source 2 loss: {}; ".format(loss_source_2)
+        log_train_acc_str += "source 2 train acc: {}; ".format(source_acc_2)
         
+    if args.domains >= 3:
+        # on source 3 domain s
+        CNet.train()
+        encoder.train()
+        source_acc_3 = 0.0
+        num_datas = 0.0
+        loss_source_3 = 0.0
+        for batch_id, (source_x, source_y) in tqdm(enumerate(s_train_dataloader), total=len(s_train_dataloader)):
+            optimizerCNet.zero_grad()
+            optimizerEncoder.zero_grad()
+            source_x = source_x.to(device).float()
+            source_y = source_y.to(device)
+            num_datas += source_x.size(0)
+            source_x_embedding = encoder(source_x)
+            pred = CNet(source_x_embedding)
+            source_acc_3 += (pred.argmax(-1) == source_y).sum().item()
+            loss = criterion_classifier(pred, source_y)
+            loss_source_3 += loss.item()
+            loss.backward()
+            optimizerCNet.step()
+            optimizerEncoder.step()
+
+
+        source_acc_3 = source_acc_3 / num_datas
+        source_acc_3_.append(source_acc_3)
+        loss_source_3_.append(loss_source_3)
+        log_loss_str += "source 3 loss: {}; ".format(loss_source_3)
+        log_train_acc_str += "source 3 train acc: {}; ".format(source_acc_3)
         
-    source_acc_2 = source_acc_2 / num_datas
-    source_acc_2_.append(source_acc_2)
-    loss_source_2_.append(loss_source_2)
+    # domain shuffle
+    if args.is_shuffle != 0:
+        accumulate_loss = 0.0
+        domain_acc = 0.0
+        DomainCNet.train()
+        encoder.train()
+        num_datas = 0.0
+        for batch_id, (adv_x, adv_y) in tqdm(enumerate(shuffle_domain_train_dataloader), total=len(shuffle_domain_train_dataloader)):
+            optimizerCNet.zero_grad()
+            optimizerEncoder.zero_grad()
+            adv_x = adv_x.to(device).float()
+            adv_y = adv_y.to(device)
+            num_datas += adv_x.size(0)
+            adv_x_embedding = encoder(adv_x)
+            pred = DomainCNet(adv_x_embedding)
+            domain_acc += (pred.argmax(-1) == adv_y).sum().item()
+            # adv_acc += (pred.argmax(-1) == adv_y).sum().item()
+            loss = args.dann_weight * criterion_classifier(pred, adv_y)
+            accumulate_loss += loss.item()
+            loss.backward()
+            optimizerDomainCNet.step()
+            if epoch >= args.start_shuffle_dann:
+                optimizerEncoder.step()    
+        domain_acc = domain_acc / num_datas
+        domain_acc_.append(domain_acc)
+        log_train_acc_str += "shuffle domain acc: {}".format(domain_acc)
+        accumulate_domain_loss_.append(accumulate_loss) 
+        if epoch == args.start_shuffle_dann:
+            logger.info("Start update Encoder using shuffling loss!")
+        
+        log_loss_str += "shuffle loss: {}; ".format(accumulate_loss)
     
-#     # DANN shuffle
-#     if args.is_shuffle != 0:
-#         accumulate_loss = 0.0
-#         domain_acc = 0.0
-#         DomainCNet.train()
-#         encoder.train()
-#         num_datas = 0.0
-#         for batch_id, (adv_x, adv_y) in tqdm(enumerate(adverial_loader), total=len(adverial_loader)):
-#             optimizerCNet.zero_grad()
-#             optimizerEncoder.zero_grad()
-#             adv_x = adv_x.to(device).float()
-#             adv_y = adv_y.to(device)
-#             num_datas += adv_x.size(0)
-#             adv_x_embedding = encoder(adv_x)
-#             pred = DomainCNet(adv_x_embedding)
-#             domain_acc += (pred.argmax(-1) == adv_y).sum().item()
-#             # adv_acc += (pred.argmax(-1) == adv_y).sum().item()
-#             loss = args.dann_weight * criterion_classifier(pred, adv_y)
-#             accumulate_loss += loss.item()
-#             loss.backward()
-            
-#             optimizerDomainCNet.step()
-#             if epoch >= args.start_shuffle_dann:
-#                 optimizerEncoder.step()    
-#         domain_acc = domain_acc / num_datas
-#         domain_acc_.append(domain_acc)
-#         if epoch == args.start_shuffle_dann:
-#             logger.info("Start update Encoder using shuffling loss!")
-#         logger.info("Epoch {}: Shuffling loss {}; ".format(epoch, accumulate_loss))
-            
+    logger.info("Epoch {}: ".format(epoch) + log_loss_str)
+    
+          
         
 
     
@@ -416,11 +470,13 @@ for epoch in range(args.epochs):
     
     
     # eval on source   
-    source_test_acc = 0.0
-    num_datas = 0.0
+
     CNet.eval()
     encoder.eval()
     
+    
+    source_test_acc_1 = 0.0
+    num_datas = 0.0    
     for batch_id, (source_x, source_y) in tqdm(enumerate(p_test_dataloader), total=len(p_test_dataloader)):
         optimizerCNet.zero_grad()
         optimizerEncoder.zero_grad()
@@ -429,15 +485,49 @@ for epoch in range(args.epochs):
         num_datas += source_x.size(0)
         source_x_embedding = encoder(source_x)
         pred = CNet(source_x_embedding)
-        source_test_acc += (pred.argmax(-1) == source_y).sum().item()
+        source_test_acc_1 += (pred.argmax(-1) == source_y).sum().item()
         
-    source_test_acc = source_test_acc / num_datas
-    source_test_acc_.append(source_test_acc)
+    source_test_acc_1 = source_test_acc_1 / num_datas
+    source_test_acc_1_.append(source_test_acc_1)
+    log_test_acc_str += "source 1 test acc: {}; ".format(source_test_acc_1)
     
+    if args.domains >= 2:
+        source_test_acc_2 = 0.0
+        num_datas = 0.0    
+        for batch_id, (source_x, source_y) in tqdm(enumerate(a_test_dataloader), total=len(a_test_dataloader)):
+            optimizerCNet.zero_grad()
+            optimizerEncoder.zero_grad()
+            source_x = source_x.to(device).float()
+            source_y = source_y.to(device)
+            num_datas += source_x.size(0)
+            source_x_embedding = encoder(source_x)
+            pred = CNet(source_x_embedding)
+            source_test_acc_2 += (pred.argmax(-1) == source_y).sum().item()
+
+        source_test_acc_2 = source_test_acc_2 / num_datas
+        source_test_acc_2_.append(source_test_acc_2)
+        log_test_acc_str += "source 2 test acc: {}; ".format(source_test_acc_2)
+    
+    if args.domains >= 3:
+        source_test_acc_3 = 0.0
+        num_datas = 0.0    
+        for batch_id, (source_x, source_y) in tqdm(enumerate(s_test_dataloader), total=len(s_test_dataloader)):
+            optimizerCNet.zero_grad()
+            optimizerEncoder.zero_grad()
+            source_x = source_x.to(device).float()
+            source_y = source_y.to(device)
+            num_datas += source_x.size(0)
+            source_x_embedding = encoder(source_x)
+            pred = CNet(source_x_embedding)
+            source_test_acc_3 += (pred.argmax(-1) == source_y).sum().item()
+
+        source_test_acc_3 = source_test_acc_3 / num_datas
+        source_test_acc_3_.append(source_test_acc_3)
+        log_test_acc_str += "source 3 test acc: {}; ".format(source_test_acc_3)
     # eval on target 
     num_datas = 0.0
     target_test_acc = 0.0
-    for batch_id, (target_x, target_y) in tqdm(enumerate(a_test_dataloader), total=len(a_test_dataloader)):
+    for batch_id, (target_x, target_y) in tqdm(enumerate(c_test_dataloader), total=len(c_test_dataloader)):
         optimizerCNet.zero_grad()
         optimizerEncoder.zero_grad()
         target_x = target_x.to(device).float()
@@ -449,18 +539,32 @@ for epoch in range(args.epochs):
     
     target_test_acc = target_test_acc / num_datas
     target_test_acc_.append(target_test_acc)
+    log_test_acc_str += "target test acc: {}; ".format(target_test_acc)
     
     if epoch % args.model_save_period == 0:
         torch.save(DomainCNet.state_dict(), os.path.join(save_folder, 'DomainCNet_%i.t7'%(epoch+1)))
         torch.save(encoder.state_dict(), os.path.join(save_folder, 'encoder_%i.t7'%(epoch+1)))
         torch.save(CNet.state_dict(), os.path.join(save_folder, 'CNet_%i.t7'%(epoch+1)))
 
+
+    logger.info("Epoch: {}; train ".format(epoch) + log_train_acc_str)
+    logger.info("Epoch: {}; test ".format(epoch) + log_test_acc_str)
     
-    logger.info('Epochs %i: source train acc: %f; source test acc: %f; domain acc: %f; target test acc: %f'%(epoch+1, source_acc, source_test_acc, 10, target_test_acc))
-    np.save(os.path.join(args.save_path, model_sub_folder, 'source_acc_.npy'),source_acc_)
-    #np.save(os.path.join(args.save_path, model_sub_folder, 'source_test_acc_.npy'),source_test_acc_)
+    np.save(os.path.join(args.save_path, model_sub_folder, 'source_acc_1_.npy'),source_acc_1_)
+    np.save(os.path.join(args.save_path, model_sub_folder, 'source_acc_2_.npy'),source_acc_2_)
+    np.save(os.path.join(args.save_path, model_sub_folder, 'source_acc_3_.npy'),source_acc_3_)
+    
+    np.save(os.path.join(args.save_path, model_sub_folder, 'source_test_acc_1_.npy'),source_test_acc_1_)
+    np.save(os.path.join(args.save_path, model_sub_folder, 'source_test_acc_2_.npy'),source_test_acc_2_)
+    np.save(os.path.join(args.save_path, model_sub_folder, 'source_test_acc_3_.npy'),source_test_acc_3_)
+    
     np.save(os.path.join(args.save_path, model_sub_folder, 'target_test_acc_.npy'),target_test_acc_)
-    #np.save(os.path.join(args.save_path, model_sub_folder, 'domain_acc_.npy'),domain_acc_)
+    np.save(os.path.join(args.save_path, model_sub_folder, 'domain_acc_.npy'),domain_acc_)
+    np.save(os.path.join(args.save_path, model_sub_folder, 'accumulate_domain_loss_.npy'),accumulate_domain_loss_)
+    
+    np.save(os.path.join(args.save_path, model_sub_folder, 'loss_source_1_.npy'),loss_source_1_)
+    np.save(os.path.join(args.save_path, model_sub_folder, 'loss_source_2_.npy'),loss_source_2_)
+    np.save(os.path.join(args.save_path, model_sub_folder, 'loss_source_3_.npy'),loss_source_3_)
 
 
 # In[ ]:

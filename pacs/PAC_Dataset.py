@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[2]:
+# In[4]:
 
 
 import torch
@@ -13,7 +13,7 @@ from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
 
 
-# In[3]:
+# In[5]:
 
 
 class PACDataset(Dataset):
@@ -136,7 +136,7 @@ class PACDataset(Dataset):
         
 
 
-# In[25]:
+# In[6]:
 
 
 class ConcatDataset(Dataset):
@@ -154,7 +154,47 @@ class ConcatDataset(Dataset):
         return self.x[index], self.y[index]
 
 
-# In[27]:
+# In[22]:
+
+
+class ConcatDomainDataset(Dataset):
+    def __init__(self, *argv):
+        """
+        *argv = (p_dataset_train, a_data_set_train, ...)
+        """
+        super(ConcatDomainDataset).__init__()
+        self.x = torch.cat([i.x for i in [*argv]], axis=0)
+        self.y = torch.cat([(torch.ones(j.y.shape[0]).long() * i) for i,j in enumerate([*argv])], axis=0)
+        self.len = self.y.shape[0]
+    def __len__(self):
+        return self.len
+    def __getitem__(self, index):
+        return self.x[index], self.y[index]
+
+
+# In[11]:
+
+
+class ShuffleClassDataset(Dataset):
+    def __init__(self, concat_dataset, seed=10):
+        super(ShuffleClassDataset).__init__()        
+        self.concat = concat_dataset # instance of ConcatDataset
+        self.x = self.concat.x
+        self.origin_y = self.concat.y
+        torch.manual_seed(seed)
+        index_permute = torch.randperm(self.origin_y.shape[0])
+        self.y = self.origin_y[index_permute]
+        self.len = self.x.shape[0]
+    def __len__(self):
+        return self.len
+    def __getitem__(self, index):
+        return self.x[index], self.y[index]
+    
+        
+        
+
+
+# In[8]:
 
 
 if __name__ == "__main__":
@@ -162,4 +202,12 @@ if __name__ == "__main__":
     a_dataset_train = PACDataset('a', split='train')
     c_dataset_train = PACDataset('c', split='train')
     s_dataset_train = PACDataset('s', split='train')
+    concat = ConcatDataset(p_dataset_train, a_dataset_train)
+    shuffle_concat = ShuffleDataset(concat)
+
+
+# In[ ]:
+
+
+
 
